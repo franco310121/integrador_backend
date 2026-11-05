@@ -25,6 +25,12 @@ public class UsuarioController {
         return ResponseEntity.ok(usuarioService.findAll());
     }
 
+    @GetMapping("/roles")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<UserDto.RolInfoResponse>> getRoles() {
+        return ResponseEntity.ok(usuarioService.listarRolesDisponibles());
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UserDto.UserResponse> getById(@PathVariable Long id) {
@@ -41,6 +47,14 @@ public class UsuarioController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UserDto.UserResponse> update(@PathVariable Long id, @RequestBody UserDto.UpdateUserRequest request) {
         return ResponseEntity.ok(usuarioService.update(id, request));
+    }
+
+    @PatchMapping("/{id}/rol")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<UserDto.UserResponse> cambiarRol(
+            @PathVariable Long id,
+            @Valid @RequestBody UserDto.CambiarRolRequest request) {
+        return ResponseEntity.ok(usuarioService.cambiarRol(id, request.getRol()));
     }
 
     @PatchMapping("/{id}/activar")

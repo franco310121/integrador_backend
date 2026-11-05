@@ -31,6 +31,15 @@ public class SimulacionFinancieraDto {
         private String nombreEscenario;
         private BigDecimal porcentajeAjusteIngresos;
         private BigDecimal porcentajeAjusteEgresos;
+        private BigDecimal ingresosBase;
+        private BigDecimal egresosBase;
+        private BigDecimal saldoBase;
+        private BigDecimal ingresosSimulados;
+        private BigDecimal egresosSimulados;
+        private BigDecimal saldoSimulado;
+        private BigDecimal variacionSaldo;
+        private String impactoLiquidez;
+        private String recomendacion;
         private String resultadoSimulacion;
         private LocalDateTime fechaSimulacion;
     }

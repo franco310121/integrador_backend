@@ -27,4 +27,15 @@ public class SimulacionFinancieraController {
     public ResponseEntity<List<SimulacionFinancieraDto.Response>> listarSimulaciones() {
         return ResponseEntity.ok(simulacionFinancieraService.listarSimulaciones());
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<SimulacionFinancieraDto.Response> obtenerPorId(@PathVariable Long id) {
+        return ResponseEntity.ok(simulacionFinancieraService.obtenerPorId(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> eliminarSimulacion(@PathVariable Long id) {
+        simulacionFinancieraService.eliminarSimulacion(id);
+        return ResponseEntity.noContent().build();
+    }
 }

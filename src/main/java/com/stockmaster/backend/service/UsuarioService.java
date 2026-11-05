@@ -93,6 +93,32 @@ public class UsuarioService {
         usuarioRepository.save(usuario);
     }
 
+    @Transactional
+    public UserDto.UserResponse cambiarRol(Long id, Rol nuevoRol) {
+        if (nuevoRol == null) {
+            throw new BadRequestException("El rol proporcionado no puede ser nulo");
+        }
+        Usuario usuario = usuarioRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado con ID: " + id));
+        usuario.setRol(nuevoRol);
+        return mapToDto(usuarioRepository.save(usuario));
+    }
+
+    public List<UserDto.RolInfoResponse> listarRolesDisponibles() {
+        return List.of(
+                UserDto.RolInfoResponse.builder()
+                        .rol(Rol.ADMIN.name().toLowerCase())
+                        .descripcion("Acceso total a la administración del sistema, usuarios, inventario, auditoría y validación de IA.")
+                        .permisos(List.of("GESTIONAR_USUARIOS", "GESTIONAR_ROLES", "VALIDAR_MODELO_IA", "SIMULAR_ESCENARIOS", "GESTIONAR_INVENTARIO", "VER_AUDITORIA"))
+                        .build(),
+                UserDto.RolInfoResponse.builder()
+                        .rol(Rol.VENDEDOR.name().toLowerCase())
+                        .descripcion("Acceso operativo a ventas, devoluciones, clientes, flujo de caja y consulta de recomendaciones.")
+                        .permisos(List.of("REGISTRAR_VENTAS", "GESTIONAR_CLIENTES", "CONSULTAR_FLUJO_CAJA", "CONSULTAR_RECOMENDACIONES", "SIMULAR_ESCENARIOS"))
+                        .build()
+        );
+    }
+
     public UserDto.UserResponse mapToDto(Usuario usuario) {
         return UserDto.UserResponse.builder()
                 .id(usuario.getId())
