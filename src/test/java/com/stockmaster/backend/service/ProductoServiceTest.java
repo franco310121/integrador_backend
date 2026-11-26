@@ -143,4 +143,25 @@ class ProductoServiceTest {
         assertEquals("inactivo", producto.getEstado());
         verify(productoRepository, times(1)).save(producto);
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"0,Sin stock", "4,Bajo", "5,Bajo", "6,Normal"})
+    void clasificaStockEnValoresLimite(int stock, String etiqueta) {
+        producto.setStock(stock);
+        assertEquals(etiqueta, productoService.mapToDto(producto).getStockLabel());
+    }
+
+    @Test
+    void precioVentaCeroNoProvocaDivisionPorCero() {
+        producto.setPrecioVenta(BigDecimal.ZERO);
+        assertEquals(0.0, productoService.mapToDto(producto).getMargen(), 0.0001);
+    }
+
+    @Test
+    void eliminarProductoInexistenteNoModificaInventario() {
+        when(productoRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(ResourceNotFoundException.class, () -> productoService.delete(99L));
+        verify(productoRepository, never()).save(any());
+        verifyNoInteractions(auditoriaService);
+    }
 }
