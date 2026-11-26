@@ -86,4 +86,13 @@ class AuthServiceTest {
         assertThrows(BadRequestException.class, () -> authService.register(request));
         verify(usuarioRepository, never()).save(any(Usuario.class));
     }
+
+    @Test
+    void credencialesIncorrectasNoGeneranToken() {
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+                .thenThrow(new org.springframework.security.authentication.BadCredentialsException("Credenciales incorrectas"));
+        assertThrows(org.springframework.security.authentication.BadCredentialsException.class,
+                () -> authService.login(new AuthDto.LoginRequest("qa@example.test", "incorrecta")));
+        verifyNoInteractions(tokenProvider, usuarioRepository);
+    }
 }
