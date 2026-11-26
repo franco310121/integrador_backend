@@ -3,6 +3,21 @@ name: Finvora - Certificacion Backend
 
 on:
   workflow_dispatch:
+    inputs:
+      categoria:
+        description: Tipo de prueba
+        required: true
+        default: Todas
+        type: choice
+        options:
+          - Todas
+          - Unitarias
+          - Caja blanca
+          - Integracion
+          - Seguridad
+          - Confiabilidad
+          - Validacion predictiva (logica)
+          - Rendimiento (interno)
   push:
     branches: [main]
   pull_request:
@@ -15,6 +30,11 @@ jobs:
   backend-tests:
     name: Pruebas automatizadas del backend
     runs-on: ubuntu-latest
+    env:
+      CATEGORIA: ${{ inputs.categoria || 'Todas' }}
+      SPRING_DATASOURCE_URL: 'jdbc:h2:mem:finvora_qa;DB_CLOSE_DELAY=-1;MODE=PostgreSQL'
+      SPRING_DATASOURCE_USERNAME: sa
+      SPRING_DATASOURCE_PASSWORD: ''
 
     steps:
       - name: Descargar codigo fuente
@@ -33,7 +53,20 @@ jobs:
         run: chmod +x gradlew
 
       - name: Ejecutar pruebas
-        run: ./gradlew clean test --console=plain
+        shell: bash
+        run: |
+          args=()
+          case "$CATEGORIA" in
+            Todas|"Caja blanca") ;;
+            Unitarias) args=(--tests '*.service.*Test' --tests '*.controller.*Test' --tests '*.security.*Test') ;;
+            Integracion) args=(--tests '*.integration.SistemaIntegracionTest' --tests '*StockmasterBackendApplicationTests') ;;
+            Seguridad) args=(--tests '*AesEncryptorTest' --tests '*AuthServiceTest' --tests '*UsuarioServiceTest' --tests '*ProductoControllerTest') ;;
+            Confiabilidad) args=(--tests '*CompraServiceTest' --tests '*VentaServiceTest' --tests '*ProductoServiceTest' --tests '*SimulacionFinancieraServiceTest' --tests '*FlujoCajaIaServiceTest') ;;
+            "Validacion predictiva (logica)") args=(--tests '*FlujoCajaIaServiceTest' --tests '*SimulacionFinancieraServiceTest') ;;
+            "Rendimiento (interno)") args=(--tests '*RendimientoEscalabilidadTest') ;;
+            *) echo "Categoria desconocida"; exit 1 ;;
+          esac
+          ./gradlew clean test --console=plain "${args[@]}"
 
       - name: Generar resumen de resultados
         if: always()
@@ -60,6 +93,8 @@ jobs:
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write("# Certificación Backend - Finvora\n\n")
+              f.write(f"**Categoria:** {os.environ['CATEGORIA']}\n\n")
+              f.write("Cobertura del conjunto seleccionado respecto al backend completo. Las categorias pueden compartir casos.\n\n")
               f.write("| Indicador | Resultado |\n")
               f.write("|---|---:|\n")
               f.write(f"| Total de pruebas | {total} |\n")
@@ -78,6 +113,10 @@ jobs:
                       if kind in ("LINE", "BRANCH", "METHOD") and covered + missed:
                           f.write(f"- {kind}: {100 * covered / (covered + missed):.2f}% ({covered}/{covered + missed})\n")
 
+              f.write("\n## Detalle por clase\n\n| Clase | Total | Fallos | Errores | Omitidas |\n|---|---:|---:|---:|---:|\n")
+              for file in sorted(files):
+                  root = ET.parse(file).getroot()
+                  f.write(f"| {root.get('name')} | {root.get('tests', 0)} | {root.get('failures', 0)} | {root.get('errors', 0)} | {root.get('skipped', 0)} |\n")
               if not files:
                   f.write("\nNo se encontraron resultados de pruebas.\n")
 
