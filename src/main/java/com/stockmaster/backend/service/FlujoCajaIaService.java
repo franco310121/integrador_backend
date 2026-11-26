@@ -40,20 +40,24 @@ public class FlujoCajaIaService {
         BigDecimal egresosTotales = transaccionCajaRepository.sumMontoByTipo("egreso");
 
         ModeloPredictivoIa modelo = modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()
+                .filter(m -> "MEDIA-MOVIL-30D-v1".equals(m.getVersionAlgoritmo()))
                 .orElseGet(() -> modeloPredictivoIaRepository.save(
                         ModeloPredictivoIa.builder()
-                                .versionAlgoritmo("ARIMA-v2.1")
-                                .precisionHistorica(BigDecimal.valueOf(92.50))
+                                .versionAlgoritmo("MEDIA-MOVIL-30D-v1")
                                 .build()
                 ));
 
         int dias = "semanal".equals(tipo) ? 7 : 30;
-        LocalDate inicio = LocalDate.now();
+        LocalDateTime ahora = LocalDateTime.now();
+        LocalDate inicio = ahora.toLocalDate().plusDays(1);
         LocalDate fin = inicio.plusDays(dias);
 
-        // Promedio estimado ponderado
-        BigDecimal ingresoProyectado = estimarMonto(ingresosTotales, tipo);
-        BigDecimal egresoProyectado = estimarMonto(egresosTotales, tipo);
+        // Ventana de 30 días calendario hasta el momento de generar la proyección.
+        LocalDateTime desde = inicio.minusDays(30).atStartOfDay();
+        BigDecimal ingresosRecientes = transaccionCajaRepository.sumMontoByTipoAndFechaBetween("ingreso", desde, ahora);
+        BigDecimal egresosRecientes = transaccionCajaRepository.sumMontoByTipoAndFechaBetween("egreso", desde, ahora);
+        BigDecimal ingresoProyectado = estimarPromedioDiario(ingresosRecientes, 30, dias);
+        BigDecimal egresoProyectado = estimarPromedioDiario(egresosRecientes, 30, dias);
         BigDecimal saldoActual = ingresosTotales.subtract(egresosTotales);
         BigDecimal saldoFinalEstimado = saldoActual.add(ingresoProyectado).subtract(egresoProyectado);
 
@@ -65,7 +69,7 @@ public class FlujoCajaIaService {
                 .ingresoProyectado(ingresoProyectado)
                 .egresoProyectado(egresoProyectado)
                 .saldoFinalEstimado(saldoFinalEstimado)
-                .nivelConfianza(BigDecimal.valueOf(94.80))
+                .nivelConfianza(null)
                 .build();
 
         ProyeccionFlujo savedProyeccion = proyeccionFlujoRepository.save(proyeccion);
@@ -76,7 +80,16 @@ public class FlujoCajaIaService {
         return mapProyeccionToDto(savedProyeccion);
     }
 
-    // Regla vigente, compartida con el backtesting; no es un modelo ARIMA entrenado.
+    // Promedio móvil de una ventana de días calendario, incluidos días sin movimientos.
+    public static BigDecimal estimarPromedioDiario(BigDecimal total, int diasHistorial, int horizonte) {
+        if (total == null || diasHistorial <= 0 || horizonte <= 0) {
+            throw new IllegalArgumentException("Historial u horizonte invalido");
+        }
+        return total.multiply(BigDecimal.valueOf(horizonte))
+                .divide(BigDecimal.valueOf(diasHistorial), 2, RoundingMode.HALF_UP);
+    }
+
+    // Regla anterior conservada exclusivamente como referencia de comparación.
     public static BigDecimal estimarMonto(BigDecimal totalHistorico, String tipo) {
         if (!"semanal".equals(tipo) && !"mensual".equals(tipo)) {
             throw new IllegalArgumentException("Periodo no valido");

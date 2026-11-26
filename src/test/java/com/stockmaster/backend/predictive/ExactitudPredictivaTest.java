@@ -73,12 +73,13 @@ class ExactitudPredictivaTest {
         return datos.subList(desde,hasta).stream().reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    static List<Par> evaluar(List<BigDecimal> datos, int horizonte) {
+    static List<Par> evaluar(List<BigDecimal> datos, int horizonte, boolean anterior) {
         List<Par> pares = new ArrayList<>();
         String tipo = horizonte == 7 ? "semanal" : "mensual";
         for (int corte = 30; corte + horizonte <= datos.size(); corte += horizonte) {
             // El algoritmo vigente usa el acumulado disponible, nunca datos posteriores al corte.
-            var estimado = FlujoCajaIaService.estimarMonto(suma(datos,0,corte),tipo);
+            var estimado = anterior ? FlujoCajaIaService.estimarMonto(suma(datos,0,corte),tipo)
+                    : FlujoCajaIaService.estimarPromedioDiario(suma(datos,corte-30,corte),30,horizonte);
             var real = suma(datos,corte,corte+horizonte);
             pares.add(new Par(real.doubleValue(),estimado.doubleValue()));
         }
@@ -89,12 +90,12 @@ class ExactitudPredictivaTest {
     void corteTemporalNoUsaDatosFuturos() {
         List<BigDecimal> a = new ArrayList<>();
         for (int i=0;i<37;i++) a.add(BigDecimal.TEN);
-        var antes = evaluar(a,7).getFirst();
+        var antes = evaluar(a,7,false).getFirst();
         a.set(36,BigDecimal.valueOf(1000));
-        var despues = evaluar(a,7).getFirst();
+        var despues = evaluar(a,7,false).getFirst();
         assertEquals(antes.estimado(),despues.estimado());
         assertNotEquals(antes.real(),despues.real());
-        assertEquals(75,antes.estimado());
+        assertEquals(70,antes.estimado());
         assertEquals(70,antes.real());
     }
 
@@ -108,14 +109,16 @@ class ExactitudPredictivaTest {
         StringBuilder informe = new StringBuilder(
                 "## Backtesting de exactitud predictiva\n\n" +
                 "**Datos sintéticos:** 120 días; primeros 30 días de historial; cortes expansivos sin información futura. " +
-                "Se evalúa la regla vigente, no ARIMA. No es evidencia de precisión en una MYPE real.\n\n" +
-                "| Horizonte | Variable | Observaciones | MAE (PEN) | RMSE (PEN) | MAPE (%) | N MAPE |\n" +
-                "|---|---|---:|---:|---:|---:|---:|\n");
-        StringBuilder detalle = new StringBuilder("horizonte,variable,corte_dia,real,estimado\n");
+                "Se comparan la regla acumulativa anterior y el promedio móvil de 30 días, no ARIMA. No es evidencia de precisión en una MYPE real.\n\n" +
+                "| Modelo | Horizonte | Variable | Observaciones | MAE (PEN) | RMSE (PEN) | MAPE (%) | N MAPE |\n" +
+                "|---|---|---|---:|---:|---:|---:|---:|\n");
+        StringBuilder detalle = new StringBuilder("modelo,horizonte,variable,corte_dia,real,estimado\n");
+        for (boolean anterior : new boolean[]{true,false}) {
+        String modelo = anterior ? "Acumulativo" : "Media movil 30d";
         for (int h : new int[]{7,30}) {
             for (String variable : List.of("Ingresos","Egresos","Flujo neto")) {
-                var ing = evaluar(ingresos,h);
-                var egr = evaluar(egresos,h);
+                var ing = evaluar(ingresos,h,anterior);
+                var egr = evaluar(egresos,h,anterior);
                 List<Par> pares = new ArrayList<>();
                 if (variable.equals("Ingresos")) pares.addAll(ing);
                 else if (variable.equals("Egresos")) pares.addAll(egr);
@@ -124,14 +127,15 @@ class ExactitudPredictivaTest {
                 var m = medir(pares);
                 assertEquals(h==7?12:3,m.n());
                 assertTrue(Double.isFinite(m.mae()) && Double.isFinite(m.rmse()));
-                informe.append(String.format(Locale.ROOT,"| %d días | %s | %d | %.2f | %.2f | %s | %d |%n",
-                        h,variable,m.n(),m.mae(),m.rmse(),
+                informe.append(String.format(Locale.ROOT,"| %s | %d días | %s | %d | %.2f | %.2f | %s | %d |%n",
+                        modelo,h,variable,m.n(),m.mae(),m.rmse(),
                         m.mape().isPresent()?String.format(Locale.ROOT,"%.2f",m.mape().getAsDouble()):"N/A",m.nMape()));
                 for (int j=0;j<pares.size();j++) {
                     var p = pares.get(j);
-                    detalle.append(String.format(Locale.ROOT,"%d,%s,%d,%.2f,%.2f%n",h,variable,30+j*h,p.real(),p.estimado()));
+                    detalle.append(String.format(Locale.ROOT,"%s,%d,%s,%d,%.2f,%.2f%n",modelo,h,variable,30+j*h,p.real(),p.estimado()));
                 }
             }
+        }
         }
         informe.append("\nNo se impone un umbral de aprobación predictiva sin requisito validado. " +
                 "JUnit verifica la metodología; aprobar JUnit no significa que el error sea aceptable.\n");
@@ -139,5 +143,21 @@ class ExactitudPredictivaTest {
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("summary.md"),informe);
         Files.writeString(dir.resolve("observaciones.csv"),detalle);
+    }
+
+    @Test
+    void promedioMovilEscalaPorHorizonte() {
+        assertEquals(new BigDecimal("700.00"), FlujoCajaIaService.estimarPromedioDiario(new BigDecimal("3000"),30,7));
+        assertEquals(new BigDecimal("3000.00"), FlujoCajaIaService.estimarPromedioDiario(new BigDecimal("3000"),30,30));
+    }
+
+    @Test
+    void promedioMovilSinMovimientosEsCero() {
+        assertEquals(new BigDecimal("0.00"), FlujoCajaIaService.estimarPromedioDiario(BigDecimal.ZERO,30,7));
+    }
+
+    @Test
+    void promedioMovilRechazaHorizonteInvalido() {
+        assertThrows(IllegalArgumentException.class, () -> FlujoCajaIaService.estimarPromedioDiario(BigDecimal.TEN,0,7));
     }
 }

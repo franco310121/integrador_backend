@@ -48,12 +48,14 @@ class FlujoCajaIaServiceTest {
     void testGenerarProyeccionSemanal_GeneraProyeccionYAlerta() {
         ModeloPredictivoIa modelo = ModeloPredictivoIa.builder()
                 .idModelo(1L)
-                .versionAlgoritmo("ARIMA-v2.1")
+                .versionAlgoritmo("MEDIA-MOVIL-30D-v1")
                 .precisionHistorica(BigDecimal.valueOf(94.50))
                 .build();
 
         when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(10000));
         when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(4000));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween(eq("ingreso"), any(), any())).thenReturn(BigDecimal.valueOf(10000));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween(eq("egreso"), any(), any())).thenReturn(BigDecimal.valueOf(4000));
         when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
         when(proyeccionFlujoRepository.save(any(ProyeccionFlujo.class))).thenAnswer(inv -> {
             ProyeccionFlujo p = inv.getArgument(0);
@@ -65,9 +67,9 @@ class FlujoCajaIaServiceTest {
 
         assertNotNull(response);
         assertEquals("semanal", response.getTipoProyeccion());
-        assertEquals(new BigDecimal("2500.00"), response.getIngresoProyectado());
-        assertEquals(new BigDecimal("1000.00"), response.getEgresoProyectado());
-        assertEquals(new BigDecimal("7500.00"), response.getSaldoFinalEstimado());
+        assertEquals(new BigDecimal("2333.33"), response.getIngresoProyectado());
+        assertEquals(new BigDecimal("933.33"), response.getEgresoProyectado());
+        assertEquals(new BigDecimal("7400.00"), response.getSaldoFinalEstimado());
         verify(alertaLiquidezRepository, times(1)).save(any(AlertaLiquidez.class));
     }
 
@@ -161,9 +163,11 @@ class FlujoCajaIaServiceTest {
     })
     void proyeccionMensualClasificaLimitesLiquidez(int ingreso, int egreso,
             BigDecimal saldoEsperado, String riesgoEsperado) {
-        ModeloPredictivoIa modelo = ModeloPredictivoIa.builder().idModelo(1L).build();
+        ModeloPredictivoIa modelo = ModeloPredictivoIa.builder().idModelo(1L).versionAlgoritmo("MEDIA-MOVIL-30D-v1").build();
         when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(ingreso));
         when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(egreso));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween(eq("ingreso"), any(), any())).thenReturn(BigDecimal.valueOf(ingreso));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween(eq("egreso"), any(), any())).thenReturn(BigDecimal.valueOf(egreso));
         when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
         when(proyeccionFlujoRepository.save(any(ProyeccionFlujo.class))).thenAnswer(i -> i.getArgument(0));
 
