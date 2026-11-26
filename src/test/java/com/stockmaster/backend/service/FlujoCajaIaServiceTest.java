@@ -144,5 +144,57 @@ class FlujoCajaIaServiceTest {
         assertTrue(desempeno.getPrecisionActualCalculada().compareTo(BigDecimal.valueOf(90)) >= 0);
         assertEquals(1, desempeno.getTotalProyeccionesEvaluadas());
     }
+
+    @Test
+    void rechazaPeriodoInvalidoSinConsultarDatos() {
+        assertThrows(IllegalArgumentException.class, () -> flujoCajaIaService.generarProyeccion("anual"));
+        verifyNoInteractions(transaccionCajaRepository, modeloPredictivoIaRepository,
+                proyeccionFlujoRepository, alertaLiquidezRepository);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "500, 1000, -1000.00, critico",
+        "1000, 1000, 0.00, medio",
+        "1499, 1000, 998.00, medio",
+        "1500, 1000, 1000.00, bajo"
+    })
+    void proyeccionMensualClasificaLimitesLiquidez(int ingreso, int egreso,
+            BigDecimal saldoEsperado, String riesgoEsperado) {
+        ModeloPredictivoIa modelo = ModeloPredictivoIa.builder().idModelo(1L).build();
+        when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(ingreso));
+        when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(egreso));
+        when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
+        when(proyeccionFlujoRepository.save(any(ProyeccionFlujo.class))).thenAnswer(i -> i.getArgument(0));
+
+        var resultado = flujoCajaIaService.generarProyeccion(" MENSUAL ");
+        assertEquals("mensual", resultado.getTipoProyeccion());
+        assertEquals(30, java.time.temporal.ChronoUnit.DAYS.between(resultado.getPeriodoInicio(), resultado.getPeriodoFin()));
+        assertEquals(0, saldoEsperado.compareTo(resultado.getSaldoFinalEstimado()));
+        var captor = org.mockito.ArgumentCaptor.forClass(AlertaLiquidez.class);
+        verify(alertaLiquidezRepository).save(captor.capture());
+        assertEquals(riesgoEsperado, captor.getValue().getNivelRiesgo());
+        assertFalse(captor.getValue().getLeido());
+    }
+
+    @Test
+    void alertaInexistenteNoSeGuarda() {
+        when(alertaLiquidezRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(com.stockmaster.backend.exception.ResourceNotFoundException.class,
+                () -> flujoCajaIaService.marcarAlertaComoLeida(99L));
+        verify(alertaLiquidezRepository, never()).save(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"0,0,medio,1", "1500,0,bajo,99.99", "1500,1000,medio,1.50"})
+    void recomendacionesSinAlertasCubrenRatios(int ingresos, int egresos, String riesgo, BigDecimal ratio) {
+        when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(ingresos));
+        when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(egresos));
+        when(alertaLiquidezRepository.findByLeidoFalse()).thenReturn(List.of());
+        var resultado = flujoCajaIaService.obtenerRecomendacionesPreventivas(null);
+        assertEquals(riesgo, resultado.getNivelRiesgoActual());
+        assertEquals(0, ratio.compareTo(resultado.getRatioCoberturaLiquidez()));
+        assertFalse(resultado.getAccionesSugeridas().isEmpty());
+    }
 }
 
