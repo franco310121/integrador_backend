@@ -132,7 +132,9 @@ class SistemaIntegracionTest {
         DesempenoModeloDto desempeno = flujoCajaIaService.validarDesempenoModelo();
         assertNotNull(desempeno);
         assertNotNull(desempeno.getEstadoSaludModelo());
-        assertTrue(desempeno.getTotalProyeccionesEvaluadas() >= 2);
+        assertEquals(0, desempeno.getTotalProyeccionesEvaluadas());
+        assertEquals("SIN_DATOS", desempeno.getEstadoSaludModelo());
+        assertNull(desempeno.getErrorPorcentualMedio());
 
         // 8. Registro y Consulta de Auditoría Transversal
         auditoriaService.registrar(usuarioPromovido.getCorreo(), "VER", "IA_FINANZAS", "Validación Integral", "Prueba integral completada");

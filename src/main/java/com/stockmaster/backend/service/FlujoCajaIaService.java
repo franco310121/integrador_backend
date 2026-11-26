@@ -265,7 +265,7 @@ public class FlujoCajaIaService {
                     .area("TESORERIA")
                     .titulo("Mantener política actual de control de caja")
                     .descripcion("Continuar registrando ingresos y egresos diariamente para preservar la precisión del modelo IA.")
-                    .impactoEsperado("Estabilidad financiera continua y proyecciones con >90% de confianza")
+                    .impactoEsperado("Mejor disponibilidad de datos para evaluar las proyecciones")
                     .build());
         }
 
@@ -287,82 +287,88 @@ public class FlujoCajaIaService {
         return mapAlertaToDto(alertaLiquidezRepository.save(alerta));
     }
 
-    // HU 18: Validar el desempeño del modelo predictivo comprobando la precisión de las proyecciones
+    // HU 18: evaluar exclusivamente periodos cerrados de la versión vigente.
     @Transactional
     public DesempenoModeloDto validarDesempenoModelo() {
         ModeloPredictivoIa modelo = modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()
+                .filter(m -> "MEDIA-MOVIL-30D-v1".equals(m.getVersionAlgoritmo()))
                 .orElseGet(() -> modeloPredictivoIaRepository.save(
-                        ModeloPredictivoIa.builder()
-                                .versionAlgoritmo("ARIMA-v2.1")
-                                .precisionHistorica(BigDecimal.valueOf(92.50))
-                                .build()
-                ));
+                        ModeloPredictivoIa.builder().versionAlgoritmo("MEDIA-MOVIL-30D-v1").build()));
 
-        BigDecimal ingresosReales = transaccionCajaRepository.sumMontoByTipo("ingreso");
-        BigDecimal egresosReales = transaccionCajaRepository.sumMontoByTipo("egreso");
-        List<ProyeccionFlujo> proyecciones = proyeccionFlujoRepository.findAll();
-
-        BigDecimal ultimaProyIngreso = BigDecimal.ZERO;
-        BigDecimal ultimaProyEgreso = BigDecimal.ZERO;
-        BigDecimal confianzaPromedio = BigDecimal.valueOf(94.80);
-        BigDecimal errorPorcentual = BigDecimal.valueOf(5.50);
-
-        if (!proyecciones.isEmpty()) {
-            ProyeccionFlujo ultima = proyecciones.get(proyecciones.size() - 1);
-            ultimaProyIngreso = ultima.getIngresoProyectado();
-            ultimaProyEgreso = ultima.getEgresoProyectado();
-
-            BigDecimal sumaConfianza = proyecciones.stream()
-                    .map(p -> p.getNivelConfianza() != null ? p.getNivelConfianza() : BigDecimal.valueOf(90.0))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            confianzaPromedio = sumaConfianza.divide(BigDecimal.valueOf(proyecciones.size()), 2, RoundingMode.HALF_UP);
-
-            // Comparar proyección normalizada contra flujo real efectivizado
-            BigDecimal factorEscala = "semanal".equalsIgnoreCase(ultima.getTipoProyeccion())
-                    ? BigDecimal.valueOf(4) : BigDecimal.ONE;
-            BigDecimal ingresoEstimadoAnualizado = ultimaProyIngreso.multiply(factorEscala);
-
-            if (ingresosReales.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal desviacion = ingresosReales.subtract(ingresoEstimadoAnualizado).abs();
-                errorPorcentual = desviacion.divide(ingresosReales, 4, RoundingMode.HALF_UP)
-                        .multiply(BigDecimal.valueOf(100))
-                        .min(BigDecimal.valueOf(35.00))
-                        .setScale(2, RoundingMode.HALF_UP);
+        LocalDate hoy = LocalDate.now();
+        List<ProyeccionFlujo> proyecciones = proyeccionFlujoRepository.findAll().stream()
+                .filter(p -> p.getModelo() != null && "MEDIA-MOVIL-30D-v1".equals(p.getModelo().getVersionAlgoritmo()))
+                .sorted(java.util.Comparator.comparing(ProyeccionFlujo::getPeriodoInicio)
+                        .thenComparing(ProyeccionFlujo::getId, java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder())))
+                .toList();
+        // Evitar contar dos veces pronósticos del mismo horizonte y fecha de inicio.
+        Map<String, ProyeccionFlujo> cerradas = new LinkedHashMap<>();
+        for (ProyeccionFlujo p : proyecciones) {
+            if (p.getPeriodoFin() != null && p.getPeriodoInicio() != null
+                    && p.getPeriodoFin().isAfter(p.getPeriodoInicio())
+                    && !p.getPeriodoFin().isAfter(hoy)
+                    && p.getFechaGeneracion() != null
+                    && p.getFechaGeneracion().isBefore(p.getPeriodoInicio().atStartOfDay())) {
+                cerradas.putIfAbsent(p.getPeriodoInicio() + ":" + p.getPeriodoFin(), p);
             }
         }
-
-        BigDecimal precisionCalculada = BigDecimal.valueOf(100).subtract(errorPorcentual).setScale(2, RoundingMode.HALF_UP);
-        modelo.setPrecisionHistorica(precisionCalculada);
-        modeloPredictivoIaRepository.save(modelo);
-
-        String estadoSalud;
-        String mensajeValidacion;
-        if (precisionCalculada.compareTo(BigDecimal.valueOf(90)) >= 0) {
-            estadoSalud = "OPTIMO";
-            mensajeValidacion = "El modelo predictivo presenta alta precisión estadística (>= 90%) frente a los flujos reales de caja.";
-        } else if (precisionCalculada.compareTo(BigDecimal.valueOf(75)) >= 0) {
-            estadoSalud = "ACEPTABLE";
-            mensajeValidacion = "El modelo predictivo opera dentro de márgenes aceptables (75% - 89%). Se sugiere incorporar más registros históricos.";
-        } else {
-            estadoSalud = "REQUIERE_REENTRENAMIENTO";
-            mensajeValidacion = "La desviación supera el umbral esperado. Se recomienda recalibrar el modelo con nuevas transacciones.";
+        BigDecimal sumaAbs = BigDecimal.ZERO;
+        BigDecimal sumaCuadrados = BigDecimal.ZERO;
+        BigDecimal sumaPorcentajes = BigDecimal.ZERO;
+        int observaciones = 0, observacionesMape = 0;
+        for (ProyeccionFlujo p : cerradas.values()) {
+            LocalDateTime desde = p.getPeriodoInicio().atStartOfDay();
+            LocalDateTime hasta = p.getPeriodoFin().atStartOfDay().minusNanos(1000);
+            BigDecimal[] reales = {
+                transaccionCajaRepository.sumMontoByTipoAndFechaBetween("ingreso", desde, hasta),
+                transaccionCajaRepository.sumMontoByTipoAndFechaBetween("egreso", desde, hasta)
+            };
+            BigDecimal[] estimados = {p.getIngresoProyectado(), p.getEgresoProyectado()};
+            for (int i = 0; i < reales.length; i++) {
+                BigDecimal error = reales[i].subtract(estimados[i]).abs();
+                sumaAbs = sumaAbs.add(error);
+                sumaCuadrados = sumaCuadrados.add(error.multiply(error));
+                observaciones++;
+                if (reales[i].signum() != 0) {
+                    sumaPorcentajes = sumaPorcentajes.add(error.multiply(BigDecimal.valueOf(100))
+                            .divide(reales[i].abs(), 12, RoundingMode.HALF_UP));
+                    observacionesMape++;
+                }
+            }
         }
-
+        BigDecimal mae = observaciones == 0 ? null : sumaAbs.divide(BigDecimal.valueOf(observaciones), 2, RoundingMode.HALF_UP);
+        BigDecimal rmse = observaciones == 0 ? null : sumaCuadrados.divide(BigDecimal.valueOf(observaciones),
+                java.math.MathContext.DECIMAL128).sqrt(java.math.MathContext.DECIMAL128).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal mape = observacionesMape == 0 ? null : sumaPorcentajes.divide(
+                BigDecimal.valueOf(observacionesMape), 2, RoundingMode.HALF_UP);
+        // Indicador legado: 100 - MAPE, acotado inferiormente a cero; no es confianza estadística.
+        BigDecimal precision = mape == null ? null : BigDecimal.valueOf(100).subtract(mape).max(BigDecimal.ZERO).setScale(2);
+        modelo.setPrecisionHistorica(precision);
+        modeloPredictivoIaRepository.save(modelo);
+        String estado = mape == null ? "SIN_DATOS" : "EVALUADO";
+        String mensaje = cerradas.isEmpty() ? "No existen pronósticos de la versión vigente con periodo cerrado."
+                : mape == null ? "Los importes reales son cero; MAPE no definido. Consultar MAE y RMSE."
+                : "Error observado en periodos cerrados registrados. No se ha establecido un umbral de aceptación.";
+        ProyeccionFlujo ultima = proyecciones.isEmpty() ? null : proyecciones.get(proyecciones.size()-1);
         return DesempenoModeloDto.builder()
                 .idModelo(modelo.getIdModelo())
                 .versionAlgoritmo(modelo.getVersionAlgoritmo())
                 .fechaEntrenamiento(modelo.getFechaEntrenamiento())
-                .precisionHistorica(modelo.getPrecisionHistorica())
-                .precisionActualCalculada(precisionCalculada)
-                .errorPorcentualMedio(errorPorcentual)
-                .nivelConfianzaPromedio(confianzaPromedio)
-                .totalProyeccionesEvaluadas(proyecciones.size())
-                .ingresosRealesAcumulados(ingresosReales.setScale(2, RoundingMode.HALF_UP))
-                .egresosRealesAcumulados(egresosReales.setScale(2, RoundingMode.HALF_UP))
-                .ultimaProyeccionIngreso(ultimaProyIngreso.setScale(2, RoundingMode.HALF_UP))
-                .ultimaProyeccionEgreso(ultimaProyEgreso.setScale(2, RoundingMode.HALF_UP))
-                .estadoSaludModelo(estadoSalud)
-                .mensajeValidacion(mensajeValidacion)
+                .precisionHistorica(precision)
+                .precisionActualCalculada(precision)
+                .errorPorcentualMedio(mape)
+                .mae(mae)
+                .rmse(rmse)
+                .observacionesEvaluadas(observaciones)
+                .observacionesMape(observacionesMape)
+                .nivelConfianzaPromedio(null)
+                .totalProyeccionesEvaluadas(cerradas.size())
+                .ingresosRealesAcumulados(transaccionCajaRepository.sumMontoByTipo("ingreso"))
+                .egresosRealesAcumulados(transaccionCajaRepository.sumMontoByTipo("egreso"))
+                .ultimaProyeccionIngreso(ultima == null ? null : ultima.getIngresoProyectado())
+                .ultimaProyeccionEgreso(ultima == null ? null : ultima.getEgresoProyectado())
+                .estadoSaludModelo(estado)
+                .mensajeValidacion(mensaje)
                 .fechaValidacion(LocalDateTime.now())
                 .build();
     }
