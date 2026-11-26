@@ -1,0 +1,77 @@
+name: Finvora - Rendimiento HTTP k6
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'performance/k6/**'
+      - '.github/workflows/k6-performance.yml'
+permissions:
+  contents: read
+jobs:
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: 'jdbc:h2:mem:k6_qa;DB_CLOSE_DELAY=-1'
+      SPRING_DATASOURCE_USERNAME: sa
+      SPRING_DATASOURCE_PASSWORD: ''
+      SPRING_JPA_HIBERNATE_DDL_AUTO: create-drop
+      SERVER_ADDRESS: 127.0.0.1
+      SERVER_PORT: '8080'
+      APP_JWT_SECRET: 'local-ephemeral-qa-secret-not-for-production-1234567890'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compilar backend
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar --console=plain
+      - name: Iniciar backend aislado
+        run: |
+          mkdir -p build/reports/k6
+          jar=$(find build/libs -name '*.jar' ! -name '*-plain.jar' | head -n 1)
+          test -n "$jar"
+          java -jar "$jar" > build/reports/k6/backend.log 2>&1 &
+          echo $! > build/reports/k6/backend.pid
+          for i in $(seq 1 90); do
+            if curl --silent --max-time 2 -o /dev/null http://127.0.0.1:8080/; then exit 0; fi
+            if ! kill -0 "$(cat build/reports/k6/backend.pid)" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          tail -n 80 build/reports/k6/backend.log
+          exit 1
+      - name: Ejecutar Grafana k6
+        run: |
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -v "$PWD/performance/k6:/scripts:ro" \
+            -v "$PWD/build/reports/k6:/reports" \
+            grafana/k6:1.0.0 run /scripts/finvora.js
+      - name: Publicar resumen
+        if: always()
+        run: |
+          if [ -f build/reports/k6/summary.md ]; then
+            cat build/reports/k6/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No se genero el reporte k6; revisar logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Detener backend
+        if: always()
+        run: |
+          if [ -f build/reports/k6/backend.pid ]; then
+            kill "$(cat build/reports/k6/backend.pid)" 2>/dev/null || true
+          fi
+      - name: Guardar evidencias
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Finvora-k6
+          path: |
+            build/reports/k6/summary.md
+            build/reports/k6/summary.json
+            build/reports/k6/backend.log
+          retention-days: 30
