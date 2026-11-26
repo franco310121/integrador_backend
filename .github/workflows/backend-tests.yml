@@ -13,6 +13,7 @@ on:
           - Todas
           - Unitarias
           - Caja blanca
+          - Cobertura 80%
           - Integracion
           - Seguridad
           - Confiabilidad
@@ -58,7 +59,7 @@ jobs:
         run: |
           args=()
           case "$CATEGORIA" in
-            Todas|"Caja blanca") ;;
+            Todas|"Caja blanca"|"Cobertura 80%") ;;
             Unitarias) args=(--tests '*.service.*Test' --tests '*.controller.*Test' --tests '*AesEncryptorTest' --tests '*JwtTokenProviderTest') ;;
             Integracion) args=(--tests '*.integration.SistemaIntegracionTest' --tests '*StockmasterBackendApplicationTests') ;;
             Seguridad) args=(--tests '*.security.*Test' --tests '*AuthServiceTest' --tests '*UsuarioServiceTest' --tests '*ProductoControllerTest') ;;
@@ -126,7 +127,40 @@ jobs:
               raise SystemExit(1)
           PY
 
-      - name: Publicar resumen predictivo
+      - name: Evaluar meta global y priorizar brechas
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          path = "build/reports/jacoco/test/jacocoTestReport.xml"
+          if not os.path.exists(path):
+              raise SystemExit("No existe reporte JaCoCo")
+          root = ET.parse(path).getroot()
+          rows = []
+          for pkg in root.findall("package"):
+              for cls in pkg.findall("class"):
+                  counter = cls.find("counter[@type='LINE']")
+                  if counter is not None:
+                      m, c = int(counter.get("missed")), int(counter.get("covered"))
+                      if m+c: rows.append((m,c,cls.get("name")))
+          counter = root.find("counter[@type='LINE']")
+          missed, covered = int(counter.get("missed")), int(counter.get("covered"))
+          total = missed + covered
+          required = (4*total+4)//5
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("\n## Objetivo propuesto: 80% de cobertura de líneas\n\n")
+              f.write(f"- Cobertura: {100*covered/total:.2f}% ({covered}/{total})\n")
+              f.write(f"- Líneas adicionales necesarias con el denominador actual: {max(0,required-covered)}\n")
+              global_run = os.environ["CATEGORIA"] in ("Todas","Caja blanca","Cobertura 80%")
+              f.write("- Estado: " + ("ALCANZADO" if covered>=required else "PENDIENTE") if global_run else "- Estado: no comparable; ejecución parcial")
+              f.write("\n\n### Clases con más líneas sin cubrir\n\n| Clase | Sin cubrir | Cobertura |\n|---|---:|---:|\n")
+              for m,c,name in sorted(rows,reverse=True)[:20]:
+                  f.write(f"| {name} | {m} | {100*c/(m+c):.2f}% |\n")
+          if os.environ["CATEGORIA"] == "Cobertura 80%" and covered < required:
+              raise SystemExit("Meta de cobertura aún no alcanzada")
+          PY
+
+
         if: always()
         run: |
           if [ -f build/reports/predictive/summary.md ]; then
