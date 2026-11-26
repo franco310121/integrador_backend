@@ -161,6 +161,7 @@ jobs:
           PY
 
 
+      - name: Publicar resumen predictivo
         if: always()
         run: |
           if [ -f build/reports/predictive/summary.md ]; then
