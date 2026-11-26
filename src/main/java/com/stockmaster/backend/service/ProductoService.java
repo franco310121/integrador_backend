@@ -218,6 +218,8 @@ public class ProductoService {
                 .precioVenta(p.getPrecioVenta())
                 .stock(p.getStock())
                 .stockMinimo(p.getStockMinimo())
+                .stockLabel(p.getStock() == null || p.getStock() <= 0 ? "Sin stock"
+                        : p.getStockMinimo() != null && p.getStock() <= p.getStockMinimo() ? "Bajo" : "Normal")
                 .estado(p.getEstado())
                 .margen(margen)
                 .margenGanancia(margen)

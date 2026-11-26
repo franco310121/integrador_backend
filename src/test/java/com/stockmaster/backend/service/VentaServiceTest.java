@@ -39,6 +39,9 @@ class VentaServiceTest {
     @Mock
     private UsuarioService usuarioService;
 
+    @Mock
+    private AuditoriaService auditoriaService;
+
     @InjectMocks
     private VentaService ventaService;
 

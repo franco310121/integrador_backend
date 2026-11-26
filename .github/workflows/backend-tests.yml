@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -66,6 +68,16 @@ jobs:
               f.write(f"| Errores | {errors} |\n")
               f.write(f"| Omitidas | {skipped} |\n")
 
+              coverage = "build/reports/jacoco/test/jacocoTestReport.xml"
+              if os.path.exists(coverage):
+                  f.write("\n## Cobertura JaCoCo\n\n")
+                  for counter in ET.parse(coverage).getroot().findall("counter"):
+                      kind = counter.get("type")
+                      covered = int(counter.get("covered", 0))
+                      missed = int(counter.get("missed", 0))
+                      if kind in ("LINE", "BRANCH", "METHOD") and covered + missed:
+                          f.write(f"- {kind}: {100 * covered / (covered + missed):.2f}% ({covered}/{covered + missed})\n")
+
               if not files:
                   f.write("\nNo se encontraron resultados de pruebas.\n")
 
@@ -81,4 +93,5 @@ jobs:
           path: |
             build/reports/tests/test/
             build/test-results/test/
+            build/reports/jacoco/test/
           retention-days: 30

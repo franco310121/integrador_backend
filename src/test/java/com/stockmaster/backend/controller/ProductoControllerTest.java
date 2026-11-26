@@ -9,6 +9,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.User;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -33,7 +38,14 @@ class ProductoControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(productoController).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(productoController)
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
+                .build();
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -67,7 +79,10 @@ class ProductoControllerTest {
                 .stock(20)
                 .build();
 
-        when(productoService.findById(1L)).thenReturn(p1);
+        var principal = User.withUsername("qa@example.test").password("unused").roles("ADMIN").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        when(productoService.findById(1L, "qa@example.test")).thenReturn(p1);
 
         mockMvc.perform(get("/api/productos/1")
                         .contentType(MediaType.APPLICATION_JSON))
