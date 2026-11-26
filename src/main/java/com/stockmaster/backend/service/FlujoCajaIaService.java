@@ -52,11 +52,8 @@ public class FlujoCajaIaService {
         LocalDate fin = inicio.plusDays(dias);
 
         // Promedio estimado ponderado
-        BigDecimal factorIngreso = "semanal".equals(tipo) ? BigDecimal.valueOf(0.25) : BigDecimal.ONE;
-        BigDecimal factorEgreso = "semanal".equals(tipo) ? BigDecimal.valueOf(0.25) : BigDecimal.ONE;
-
-        BigDecimal ingresoProyectado = ingresosTotales.multiply(factorIngreso).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal egresoProyectado = egresosTotales.multiply(factorEgreso).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal ingresoProyectado = estimarMonto(ingresosTotales, tipo);
+        BigDecimal egresoProyectado = estimarMonto(egresosTotales, tipo);
         BigDecimal saldoActual = ingresosTotales.subtract(egresosTotales);
         BigDecimal saldoFinalEstimado = saldoActual.add(ingresoProyectado).subtract(egresoProyectado);
 
@@ -77,6 +74,15 @@ public class FlujoCajaIaService {
         evaluarYGenerarAlerta(savedProyeccion);
 
         return mapProyeccionToDto(savedProyeccion);
+    }
+
+    // Regla vigente, compartida con el backtesting; no es un modelo ARIMA entrenado.
+    public static BigDecimal estimarMonto(BigDecimal totalHistorico, String tipo) {
+        if (!"semanal".equals(tipo) && !"mensual".equals(tipo)) {
+            throw new IllegalArgumentException("Periodo no valido");
+        }
+        BigDecimal factor = "semanal".equals(tipo) ? new BigDecimal("0.25") : BigDecimal.ONE;
+        return totalHistorico.multiply(factor).setScale(2, RoundingMode.HALF_UP);
     }
 
     private void evaluarYGenerarAlerta(ProyeccionFlujo proyeccion) {
