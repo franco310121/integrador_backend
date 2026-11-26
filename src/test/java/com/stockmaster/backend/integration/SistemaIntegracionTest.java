@@ -139,5 +139,116 @@ class SistemaIntegracionTest {
         List<AuditoriaLogDto.Response> logs = auditoriaService.findAll();
         assertFalse(logs.isEmpty());
     }
+
+    @Autowired
+    private com.stockmaster.backend.repository.TransaccionCajaRepository cajaRepository;
+
+    @Autowired
+    private com.stockmaster.backend.repository.ProyeccionFlujoRepository proyeccionRepository;
+
+    @Autowired
+    private com.stockmaster.backend.repository.AlertaLiquidezRepository alertaRepository;
+
+    @Autowired
+    private jakarta.persistence.EntityManager entityManager;
+
+    private TransaccionCajaDto.Response registrar(String tipo, String monto) {
+        return transaccionCajaService.registrarTransaccion(TransaccionCajaDto.Request.builder()
+                .tipo(tipo).monto(new BigDecimal(monto)).categoriaGasto("QA").build());
+    }
+
+    private void verificarMonto(String esperado, BigDecimal real) {
+        assertEquals(0, new BigDecimal(esperado).compareTo(real));
+    }
+
+    @Test
+    void ingresoSePersisteYNormaliza() {
+        var ingreso = registrar(" INGRESO ", "1250.50");
+        entityManager.flush();
+        entityManager.clear();
+        var guardado = cajaRepository.findById(ingreso.getId()).orElseThrow();
+        assertEquals("ingreso", guardado.getTipo());
+        assertEquals("efectivizado", guardado.getEstado());
+        verificarMonto("1250.50", guardado.getMonto());
+    }
+
+    @Test
+    void egresoSePersisteConCategoria() {
+        var egreso = registrar("egreso", "420.75");
+        entityManager.flush();
+        entityManager.clear();
+        var guardado = cajaRepository.findById(egreso.getId()).orElseThrow();
+        assertEquals("egreso", guardado.getTipo());
+        assertEquals("QA", guardado.getCategoriaGasto());
+        verificarMonto("420.75", guardado.getMonto());
+    }
+
+    @Test
+    void movimientosActualizanSaldoHistoricoExacto() {
+        var antes = transaccionCajaService.getHistoricoFlujoCaja();
+        registrar("ingreso", "1000.00");
+        registrar("egreso", "300.25");
+        entityManager.flush();
+        entityManager.clear();
+        var despues = transaccionCajaService.getHistoricoFlujoCaja();
+        verificarMonto("1000.00", despues.getTotalIngresos().subtract(antes.getTotalIngresos()));
+        verificarMonto("300.25", despues.getTotalEgresos().subtract(antes.getTotalEgresos()));
+        verificarMonto("699.75", despues.getSaldoNetoHistorico().subtract(antes.getSaldoNetoHistorico()));
+        assertEquals(antes.getCantidadTransacciones() + 2, despues.getCantidadTransacciones());
+    }
+
+    @Test
+    void importacionMixtaPersisteSoloRegistrosValidos() {
+        long antes = cajaRepository.count();
+        var resultado = transaccionCajaService.importarTransacciones(ImportarFinancieroDto.Request.builder()
+                .registros(List.of(
+                        ImportarFinancieroDto.RegistroImportacion.builder().tipo("ingreso").monto(150.50).fechaTransaccion("2026-01-15").build(),
+                        ImportarFinancieroDto.RegistroImportacion.builder().tipo("egreso").monto(50.25).build(),
+                        ImportarFinancieroDto.RegistroImportacion.builder().tipo("egreso").monto(-10.0).build(),
+                        ImportarFinancieroDto.RegistroImportacion.builder().tipo("otro").monto(20.0).build()
+                )).build());
+        entityManager.flush();
+        entityManager.clear();
+        assertEquals(2, resultado.getProcesadosExitosos());
+        assertEquals(2, resultado.getRegistrosConError());
+        assertEquals(2, resultado.getDetallesError().size());
+        assertEquals(antes + 2, cajaRepository.count());
+    }
+
+    @Test
+    void proyeccionMensualPersisteAlertaCriticaRelacionada() {
+        BigDecimal ingresos = cajaRepository.sumMontoByTipo("ingreso");
+        BigDecimal egresos = cajaRepository.sumMontoByTipo("egreso");
+        BigDecimal ajuste = ingresos.subtract(egresos).max(BigDecimal.ZERO).add(new BigDecimal("1000.00"));
+        registrar("egreso", ajuste.toPlainString());
+        var proyeccion = flujoCajaIaService.generarProyeccion("mensual");
+        entityManager.flush();
+        entityManager.clear();
+        var guardada = proyeccionRepository.findById(proyeccion.getId()).orElseThrow();
+        assertTrue(guardada.getSaldoFinalEstimado().signum() < 0);
+        var alerta = alertaRepository.findByLeidoFalse().stream()
+                .filter(a -> a.getProyeccion() != null && proyeccion.getId().equals(a.getProyeccion().getId()))
+                .findFirst().orElseThrow();
+        assertEquals("critico", alerta.getNivelRiesgo());
+        assertNotNull(alerta.getRecomendacionPreventiva());
+        Long alertaId = alerta.getId();
+        flujoCajaIaService.marcarAlertaComoLeida(alertaId);
+        entityManager.flush();
+        entityManager.clear();
+        assertTrue(alertaRepository.findById(alertaId).orElseThrow().getLeido());
+        assertTrue(alertaRepository.findByLeidoFalse().stream().noneMatch(a -> alertaId.equals(a.getId())));
+    }
+
+    @Test
+    void transaccionesPendientesNoAlteranSaldoEfectivo() {
+        var antes = transaccionCajaService.getHistoricoFlujoCaja();
+        cajaRepository.save(com.stockmaster.backend.entity.TransaccionCaja.builder()
+                .tipo("ingreso").monto(new BigDecimal("999.00")).estado("pendiente").build());
+        entityManager.flush();
+        entityManager.clear();
+        var despues = transaccionCajaService.getHistoricoFlujoCaja();
+        assertEquals(0, antes.getSaldoNetoHistorico().compareTo(despues.getSaldoNetoHistorico()));
+        assertEquals(antes.getCantidadTransacciones(), despues.getCantidadTransacciones());
+    }
 }
 
