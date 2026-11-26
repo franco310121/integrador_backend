@@ -114,5 +114,37 @@ class SimulacionFinancieraServiceTest {
         when(simulacionFinancieraRepository.findById(99L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> simulacionFinancieraService.obtenerPorId(99L));
     }
+
+    @Test
+    void simulacionConReduccionDeLiquidezSinDeficit() {
+        when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(10000));
+        when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(5000));
+        when(simulacionFinancieraRepository.save(any(SimulacionFinanciera.class))).thenAnswer(i -> i.getArgument(0));
+        var resultado = simulacionFinancieraService.crearSimulacion(SimulacionFinancieraDto.Request.builder()
+                .nombreEscenario("Reduccion").porcentajeAjusteIngresos(BigDecimal.valueOf(-20)).build());
+        assertEquals(new BigDecimal("3000.00"), resultado.getSaldoSimulado());
+        assertEquals(new BigDecimal("-2000.00"), resultado.getVariacionSaldo());
+        assertEquals("REDUCCION_LIQUIDEZ", resultado.getImpactoLiquidez());
+    }
+
+    @Test
+    void simulacionSinAjustesMantieneSaldo() {
+        when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(1000));
+        when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(400));
+        when(simulacionFinancieraRepository.save(any(SimulacionFinanciera.class))).thenAnswer(i -> i.getArgument(0));
+        var resultado = simulacionFinancieraService.crearSimulacion(SimulacionFinancieraDto.Request.builder()
+                .nombreEscenario(" Base ").build());
+        assertEquals("Base", resultado.getNombreEscenario());
+        assertEquals(new BigDecimal("600.00"), resultado.getSaldoSimulado());
+        assertEquals(new BigDecimal("0.00"), resultado.getVariacionSaldo());
+        assertEquals("POSITIVO", resultado.getImpactoLiquidez());
+    }
+
+    @Test
+    void eliminarSimulacionInexistenteNoEliminaDatos() {
+        when(simulacionFinancieraRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(ResourceNotFoundException.class, () -> simulacionFinancieraService.eliminarSimulacion(99L));
+        verify(simulacionFinancieraRepository, never()).delete(any());
+    }
 }
 
