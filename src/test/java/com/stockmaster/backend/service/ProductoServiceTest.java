@@ -30,6 +30,9 @@ class ProductoServiceTest {
     @Mock
     private CategoriaService categoriaService;
 
+    @Mock
+    private AuditoriaService auditoriaService;
+
     @InjectMocks
     private ProductoService productoService;
 
