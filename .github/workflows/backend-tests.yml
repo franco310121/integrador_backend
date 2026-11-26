@@ -17,6 +17,7 @@ on:
           - Seguridad
           - Confiabilidad
           - Validacion predictiva (logica)
+          - Exactitud predictiva (backtesting)
           - Rendimiento (interno)
   push:
     branches: [main]
@@ -63,6 +64,7 @@ jobs:
             Seguridad) args=(--tests '*.security.*Test' --tests '*AuthServiceTest' --tests '*UsuarioServiceTest' --tests '*ProductoControllerTest') ;;
             Confiabilidad) args=(--tests '*.reliability.*Test' --tests '*CompraServiceTest' --tests '*VentaServiceTest' --tests '*ProductoServiceTest' --tests '*SimulacionFinancieraServiceTest' --tests '*FlujoCajaIaServiceTest') ;;
             "Validacion predictiva (logica)") args=(--tests '*FlujoCajaIaServiceTest' --tests '*SimulacionFinancieraServiceTest') ;;
+            "Exactitud predictiva (backtesting)") args=(--tests "*ExactitudPredictivaTest") ;;
             "Rendimiento (interno)") args=(--tests '*RendimientoEscalabilidadTest') ;;
             *) echo "Categoria desconocida"; exit 1 ;;
           esac
@@ -124,6 +126,13 @@ jobs:
               raise SystemExit(1)
           PY
 
+      - name: Publicar resumen predictivo
+        if: always()
+        run: |
+          if [ -f build/reports/predictive/summary.md ]; then
+            cat build/reports/predictive/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Publicar reporte de pruebas
         if: always()
         uses: actions/upload-artifact@v4
@@ -133,4 +142,5 @@ jobs:
             build/reports/tests/test/
             build/test-results/test/
             build/reports/jacoco/test/
+            build/reports/predictive/
           retention-days: 30
