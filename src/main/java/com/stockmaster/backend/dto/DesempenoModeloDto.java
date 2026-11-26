@@ -17,13 +17,17 @@ public class DesempenoModeloDto {
     private BigDecimal precisionHistorica;
     private BigDecimal precisionActualCalculada;
     private BigDecimal errorPorcentualMedio;
+    private BigDecimal mae;
+    private BigDecimal rmse;
+    private Integer observacionesEvaluadas;
+    private Integer observacionesMape;
     private BigDecimal nivelConfianzaPromedio;
     private Integer totalProyeccionesEvaluadas;
     private BigDecimal ingresosRealesAcumulados;
     private BigDecimal egresosRealesAcumulados;
     private BigDecimal ultimaProyeccionIngreso;
     private BigDecimal ultimaProyeccionEgreso;
-    private String estadoSaludModelo; // "OPTIMO", "ACEPTABLE", "REQUIERE_REENTRENAMIENTO"
+    private String estadoSaludModelo; // "SIN_DATOS", "EVALUADO"
     private String mensajeValidacion;
     private LocalDateTime fechaValidacion;
 }
