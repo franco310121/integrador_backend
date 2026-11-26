@@ -113,38 +113,68 @@ class FlujoCajaIaServiceTest {
         assertTrue(res.getLeido());
     }
 
+    private ModeloPredictivoIa modeloVigente() {
+        return ModeloPredictivoIa.builder().idModelo(1L).versionAlgoritmo("MEDIA-MOVIL-30D-v1").build();
+    }
+
+    private ProyeccionFlujo pronostico(ModeloPredictivoIa modelo, LocalDate inicio, long id) {
+        return ProyeccionFlujo.builder().id(id).modelo(modelo).tipoProyeccion("semanal")
+                .periodoInicio(inicio).periodoFin(inicio.plusDays(7))
+                .fechaGeneracion(inicio.minusDays(1).atTime(12,0))
+                .ingresoProyectado(new BigDecimal("300")).egresoProyectado(new BigDecimal("40")).build();
+    }
+
     @Test
-    void testValidarDesempenoModelo_CompruebaPrecisionOptima() {
-        ModeloPredictivoIa modelo = ModeloPredictivoIa.builder()
-                .idModelo(1L)
-                .versionAlgoritmo("ARIMA-v2.1")
-                .precisionHistorica(BigDecimal.valueOf(92.50))
-                .build();
-
-        ProyeccionFlujo proyeccion = ProyeccionFlujo.builder()
-                .id(1L)
-                .modelo(modelo)
-                .tipoProyeccion("mensual")
-                .periodoInicio(LocalDate.now())
-                .periodoFin(LocalDate.now().plusDays(30))
-                .ingresoProyectado(BigDecimal.valueOf(19500))
-                .egresoProyectado(BigDecimal.valueOf(8000))
-                .saldoFinalEstimado(BigDecimal.valueOf(11500))
-                .nivelConfianza(BigDecimal.valueOf(95.00))
-                .build();
-
+    void desempenoComparaMismoPeriodoSinLimitarError() {
+        var modelo = modeloVigente();
+        var inicio = LocalDate.now().minusDays(8);
+        var p = pronostico(modelo,inicio,1);
         when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
-        when(transaccionCajaRepository.sumMontoByTipo("ingreso")).thenReturn(BigDecimal.valueOf(20000));
-        when(transaccionCajaRepository.sumMontoByTipo("egreso")).thenReturn(BigDecimal.valueOf(8200));
-        when(proyeccionFlujoRepository.findAll()).thenReturn(List.of(proyeccion));
+        when(proyeccionFlujoRepository.findAll()).thenReturn(List.of(p));
+        var desde = inicio.atStartOfDay();
+        var hasta = inicio.plusDays(7).atStartOfDay().minusNanos(1000);
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween("ingreso",desde,hasta)).thenReturn(new BigDecimal("100"));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween("egreso",desde,hasta)).thenReturn(new BigDecimal("20"));
+        var resultado = flujoCajaIaService.validarDesempenoModelo();
+        assertEquals(new BigDecimal("150.00"),resultado.getErrorPorcentualMedio());
+        assertEquals(new BigDecimal("110.00"),resultado.getMae());
+        assertEquals(new BigDecimal("142.13"),resultado.getRmse());
+        assertEquals(new BigDecimal("0.00"),resultado.getPrecisionActualCalculada());
+        assertEquals("EVALUADO",resultado.getEstadoSaludModelo());
+        assertNull(resultado.getNivelConfianzaPromedio());
+        assertEquals(1,resultado.getTotalProyeccionesEvaluadas());
+        assertEquals(2,resultado.getObservacionesMape());
+    }
 
-        DesempenoModeloDto desempeno = flujoCajaIaService.validarDesempenoModelo();
+    @Test
+    void desempenoSinPeriodosCerradosNoInventaMetricas() {
+        var modelo = modeloVigente();
+        when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
+        when(proyeccionFlujoRepository.findAll()).thenReturn(List.of(pronostico(modelo,LocalDate.now().plusDays(1),1)));
+        var resultado = flujoCajaIaService.validarDesempenoModelo();
+        assertEquals("SIN_DATOS",resultado.getEstadoSaludModelo());
+        assertEquals(0,resultado.getTotalProyeccionesEvaluadas());
+        assertNull(resultado.getErrorPorcentualMedio());
+        assertNull(resultado.getPrecisionActualCalculada());
+        assertNull(resultado.getMae());
+        verify(transaccionCajaRepository,never()).sumMontoByTipoAndFechaBetween(any(),any(),any());
+    }
 
-        assertNotNull(desempeno);
-        assertEquals("ARIMA-v2.1", desempeno.getVersionAlgoritmo());
-        assertEquals("OPTIMO", desempeno.getEstadoSaludModelo());
-        assertTrue(desempeno.getPrecisionActualCalculada().compareTo(BigDecimal.valueOf(90)) >= 0);
-        assertEquals(1, desempeno.getTotalProyeccionesEvaluadas());
+    @Test
+    void desempenoExcluyeVersionAnteriorYDuplicadosYMapeConCeros() {
+        var modelo = modeloVigente();
+        var inicio = LocalDate.now().minusDays(8);
+        var anterior = ModeloPredictivoIa.builder().versionAlgoritmo("ARIMA-v2.1").build();
+        when(modeloPredictivoIaRepository.findFirstByOrderByIdModeloDesc()).thenReturn(Optional.of(modelo));
+        when(proyeccionFlujoRepository.findAll()).thenReturn(List.of(
+                pronostico(anterior,inicio,1),pronostico(modelo,inicio,2),pronostico(modelo,inicio,3)));
+        when(transaccionCajaRepository.sumMontoByTipoAndFechaBetween(any(),any(),any())).thenReturn(BigDecimal.ZERO);
+        var resultado = flujoCajaIaService.validarDesempenoModelo();
+        assertEquals(1,resultado.getTotalProyeccionesEvaluadas());
+        assertEquals(2,resultado.getObservacionesEvaluadas());
+        assertEquals(0,resultado.getObservacionesMape());
+        assertNull(resultado.getErrorPorcentualMedio());
+        assertEquals(new BigDecimal("170.00"),resultado.getMae());
     }
 
     @Test
