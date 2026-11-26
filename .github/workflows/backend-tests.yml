@@ -58,9 +58,9 @@ jobs:
           args=()
           case "$CATEGORIA" in
             Todas|"Caja blanca") ;;
-            Unitarias) args=(--tests '*.service.*Test' --tests '*.controller.*Test' --tests '*.security.*Test') ;;
+            Unitarias) args=(--tests '*.service.*Test' --tests '*.controller.*Test' --tests '*AesEncryptorTest' --tests '*JwtTokenProviderTest') ;;
             Integracion) args=(--tests '*.integration.SistemaIntegracionTest' --tests '*StockmasterBackendApplicationTests') ;;
-            Seguridad) args=(--tests '*AesEncryptorTest' --tests '*AuthServiceTest' --tests '*UsuarioServiceTest' --tests '*ProductoControllerTest') ;;
+            Seguridad) args=(--tests '*.security.*Test' --tests '*AuthServiceTest' --tests '*UsuarioServiceTest' --tests '*ProductoControllerTest') ;;
             Confiabilidad) args=(--tests '*CompraServiceTest' --tests '*VentaServiceTest' --tests '*ProductoServiceTest' --tests '*SimulacionFinancieraServiceTest' --tests '*FlujoCajaIaServiceTest') ;;
             "Validacion predictiva (logica)") args=(--tests '*FlujoCajaIaServiceTest' --tests '*SimulacionFinancieraServiceTest') ;;
             "Rendimiento (interno)") args=(--tests '*RendimientoEscalabilidadTest') ;;
