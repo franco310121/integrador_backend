@@ -1,0 +1,84 @@
+
+name: Finvora - Certificacion Backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Pruebas automatizadas del backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar codigo fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Otorgar permisos a Gradle
+        run: chmod +x gradlew
+
+      - name: Ejecutar pruebas
+        run: ./gradlew clean test --console=plain
+
+      - name: Generar resumen de resultados
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import xml.etree.ElementTree as ET
+
+          files = glob.glob(
+              "build/test-results/test/TEST-*.xml"
+          )
+
+          total = failures = errors = skipped = 0
+
+          for file in files:
+              root = ET.parse(file).getroot()
+              total += int(root.get("tests", 0))
+              failures += int(root.get("failures", 0))
+              errors += int(root.get("errors", 0))
+              skipped += int(root.get("skipped", 0))
+
+          passed = total - failures - errors - skipped
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("# Certificación Backend - Finvora\n\n")
+              f.write("| Indicador | Resultado |\n")
+              f.write("|---|---:|\n")
+              f.write(f"| Total de pruebas | {total} |\n")
+              f.write(f"| Aprobadas | {passed} |\n")
+              f.write(f"| Fallidas | {failures} |\n")
+              f.write(f"| Errores | {errors} |\n")
+              f.write(f"| Omitidas | {skipped} |\n")
+
+              if not files:
+                  f.write("\nNo se encontraron resultados de pruebas.\n")
+
+          if not files or total == 0:
+              raise SystemExit(1)
+          PY
+
+      - name: Publicar reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Finvora-Reporte-Backend
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/
+          retention-days: 30
